@@ -1,6 +1,6 @@
 {
   "name": "Java Dev Container",
-  "image": "mcr.microsoft.com/devcontainers/java:17",
+  "image": "ghcr.io/temannin/devcontainers-java-17",
   
   "customizations": {
     "vscode": {
@@ -11,6 +11,5 @@
   },
 
   "forwardPorts": [8080],
-  
-  "postCreateCommand": "mvn clean install -DskipTests"
+  "postCreateCommand": "mvn clean install"
 }
