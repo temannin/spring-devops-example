@@ -24,6 +24,12 @@ jobs:
         distribution: 'temurin'
         cache: 'maven'
     
+    - name: Install Maven (for act/local testing)
+      if: env.ACT == 'true'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y maven
+    
     - name: Cache Maven dependencies
       uses: actions/cache@v4
       with:
@@ -34,75 +40,144 @@ jobs:
     - name: Run tests with JaCoCo
       run: mvn clean test jacoco:report
         
-    - name: Parse JaCoCo XML Report
+    - name: Parse JaCoCo CSV Report
       if: github.event_name == 'pull_request'
       id: parse-coverage
       run: |
-        if [ -f "./target/site/jacoco/jacoco.csv" ]; then
-          # Extract coverage data from CSV (more reliable than HTML parsing)
-          COVERAGE_DATA=$(tail -n 1 ./target/site/jacoco/jacoco.csv)
-          IFS=',' read -r GROUP MODULE PACKAGE CLASS INSTRUCTION_MISSED INSTRUCTION_COVERED BRANCH_MISSED BRANCH_COVERED LINE_MISSED LINE_COVERED COMPLEXITY_MISSED COMPLEXITY_COVERED METHOD_MISSED METHOD_COVERED <<< "$COVERAGE_DATA"
-          
-          # Calculate percentages
-          TOTAL_INSTRUCTIONS=$((INSTRUCTION_MISSED + INSTRUCTION_COVERED))
-          TOTAL_BRANCHES=$((BRANCH_MISSED + BRANCH_COVERED))
-          TOTAL_LINES=$((LINE_MISSED + LINE_COVERED))
-          TOTAL_METHODS=$((METHOD_MISSED + METHOD_COVERED))
-          
-          if [ $TOTAL_INSTRUCTIONS -gt 0 ]; then
-            INSTRUCTION_PERCENT=$(( (INSTRUCTION_COVERED * 10000) / TOTAL_INSTRUCTIONS ))
-            INSTRUCTION_PERCENT=$(echo "scale=2; $INSTRUCTION_PERCENT / 100" | awk '{printf "%.2f", $1}')
-          else
-            INSTRUCTION_PERCENT="0.00"
-          fi
-          
-          if [ $TOTAL_BRANCHES -gt 0 ]; then
-            BRANCH_PERCENT=$(( (BRANCH_COVERED * 10000) / TOTAL_BRANCHES ))
-            BRANCH_PERCENT=$(echo "scale=2; $BRANCH_PERCENT / 100" | awk '{printf "%.2f", $1}')
-          else
-            BRANCH_PERCENT="0.00"
-          fi
-          
-          if [ $TOTAL_LINES -gt 0 ]; then
-            LINE_PERCENT=$(( (LINE_COVERED * 10000) / TOTAL_LINES ))
-            LINE_PERCENT=$(echo "scale=2; $LINE_PERCENT / 100" | awk '{printf "%.2f", $1}')
-          else
-            LINE_PERCENT="0.00"
-          fi
-          
-          if [ $TOTAL_METHODS -gt 0 ]; then
-            METHOD_PERCENT=$(( (METHOD_COVERED * 10000) / TOTAL_METHODS ))
-            METHOD_PERCENT=$(echo "scale=2; $METHOD_PERCENT / 100" | awk '{printf "%.2f", $1}')
-          else
-            METHOD_PERCENT="0.00"
-          fi
-          
-          echo "instruction_percent=$INSTRUCTION_PERCENT" >> $GITHUB_OUTPUT
-          echo "branch_percent=$BRANCH_PERCENT" >> $GITHUB_OUTPUT
-          echo "line_percent=$LINE_PERCENT" >> $GITHUB_OUTPUT
-          echo "method_percent=$METHOD_PERCENT" >> $GITHUB_OUTPUT
-          echo "instruction_covered=$INSTRUCTION_COVERED" >> $GITHUB_OUTPUT
-          echo "instruction_total=$TOTAL_INSTRUCTIONS" >> $GITHUB_OUTPUT
-          echo "branch_covered=$BRANCH_COVERED" >> $GITHUB_OUTPUT
-          echo "branch_total=$TOTAL_BRANCHES" >> $GITHUB_OUTPUT
-          echo "line_covered=$LINE_COVERED" >> $GITHUB_OUTPUT
-          echo "line_total=$TOTAL_LINES" >> $GITHUB_OUTPUT
-          echo "method_covered=$METHOD_COVERED" >> $GITHUB_OUTPUT
-          echo "method_total=$TOTAL_METHODS" >> $GITHUB_OUTPUT
+        python3 << 'EOF'
+        import os
+        import csv
+        import sys
+        
+        csv_path = "./target/site/jacoco/jacoco.csv"
+        
+        def calculate_percentage(covered, total):
+            if total == 0:
+                return 0.0
+            return round((covered / total) * 100, 2)
+        
+        # Check if CSV file exists
+        if not os.path.exists(csv_path):
+            print(f"ERROR: JaCoCo CSV file not found at {csv_path}")
+            print("Make sure JaCoCo is properly configured and tests have been run.")
+            sys.exit(1)
+        
+        try:
+            with open(csv_path, 'r') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+                
+                if not rows:
+                    print("ERROR: JaCoCo CSV file is empty")
+                    sys.exit(1)
+                
+                # Get the last row (total summary)
+                last_row = rows[-1]
+                if len(last_row) < 13:
+                    print(f"ERROR: Invalid CSV format. Expected at least 13 columns, got {len(last_row)}")
+                    sys.exit(1)
+                
+                # CSV format: GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED
+                coverage_data = {
+                    'instruction_missed': int(last_row[3]),
+                    'instruction_covered': int(last_row[4]),
+                    'branch_missed': int(last_row[5]),
+                    'branch_covered': int(last_row[6]),
+                    'line_missed': int(last_row[7]),
+                    'line_covered': int(last_row[8]),
+                    'method_missed': int(last_row[11]),
+                    'method_covered': int(last_row[12])
+                }
+                
+                # Calculate totals and percentages
+                instruction_total = coverage_data['instruction_missed'] + coverage_data['instruction_covered']
+                branch_total = coverage_data['branch_missed'] + coverage_data['branch_covered']
+                line_total = coverage_data['line_missed'] + coverage_data['line_covered']
+                method_total = coverage_data['method_missed'] + coverage_data['method_covered']
+                
+                outputs = {
+                    'instruction_percent': str(calculate_percentage(coverage_data['instruction_covered'], instruction_total)),
+                    'branch_percent': str(calculate_percentage(coverage_data['branch_covered'], branch_total)),
+                    'line_percent': str(calculate_percentage(coverage_data['line_covered'], line_total)),
+                    'method_percent': str(calculate_percentage(coverage_data['method_covered'], method_total)),
+                    'instruction_covered': str(coverage_data['instruction_covered']),
+                    'instruction_total': str(instruction_total),
+                    'branch_covered': str(coverage_data['branch_covered']),
+                    'branch_total': str(branch_total),
+                    'line_covered': str(coverage_data['line_covered']),
+                    'line_total': str(line_total),
+                    'method_covered': str(coverage_data['method_covered']),
+                    'method_total': str(method_total)
+                }
+                
+                # Write outputs to GitHub Actions
+                github_output = os.environ.get('GITHUB_OUTPUT')
+                if github_output:
+                    with open(github_output, 'a') as f:
+                        for key, value in outputs.items():
+                            f.write(f"{key}={value}\n")
+                else:
+                    # Fallback for debugging
+                    for key, value in outputs.items():
+                        print(f"{key}={value}")
+                        
+        except (ValueError, IndexError) as e:
+            print(f"ERROR: Failed to parse JaCoCo CSV file: {e}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"ERROR: Unexpected error parsing JaCoCo CSV: {e}")
+            sys.exit(1)
+        EOF
+
+    - name: Log coverage comment (for act/local testing)
+      if: github.event_name == 'pull_request' && env.ACT == 'true'
+      run: |
+        INSTRUCTION_PERCENT='${{ steps.parse-coverage.outputs.instruction_percent }}'
+        BRANCH_PERCENT='${{ steps.parse-coverage.outputs.branch_percent }}'
+        LINE_PERCENT='${{ steps.parse-coverage.outputs.line_percent }}'
+        METHOD_PERCENT='${{ steps.parse-coverage.outputs.method_percent }}'
+        
+        INSTRUCTION_COVERED='${{ steps.parse-coverage.outputs.instruction_covered }}'
+        INSTRUCTION_TOTAL='${{ steps.parse-coverage.outputs.instruction_total }}'
+        BRANCH_COVERED='${{ steps.parse-coverage.outputs.branch_covered }}'
+        BRANCH_TOTAL='${{ steps.parse-coverage.outputs.branch_total }}'
+        LINE_COVERED='${{ steps.parse-coverage.outputs.line_covered }}'
+        LINE_TOTAL='${{ steps.parse-coverage.outputs.line_total }}'
+        METHOD_COVERED='${{ steps.parse-coverage.outputs.method_covered }}'
+        METHOD_TOTAL='${{ steps.parse-coverage.outputs.method_total }}'
+        
+        # Determine overall coverage status
+        OVERALL_COVERAGE=$(echo "$INSTRUCTION_PERCENT" | awk '{print int($1)}')
+        if [ "$OVERALL_COVERAGE" -lt 50 ]; then
+          STATUS_EMOJI="🔴"
+          STATUS_TEXT="Needs Improvement"
+        elif [ "$OVERALL_COVERAGE" -lt 80 ]; then
+          STATUS_EMOJI="🟡"
+          STATUS_TEXT="Fair"
         else
-          echo "instruction_percent=0.00" >> $GITHUB_OUTPUT
-          echo "branch_percent=0.00" >> $GITHUB_OUTPUT
-          echo "line_percent=0.00" >> $GITHUB_OUTPUT
-          echo "method_percent=0.00" >> $GITHUB_OUTPUT
-          echo "instruction_covered=0" >> $GITHUB_OUTPUT
-          echo "instruction_total=0" >> $GITHUB_OUTPUT
-          echo "branch_covered=0" >> $GITHUB_OUTPUT
-          echo "branch_total=0" >> $GITHUB_OUTPUT
-          echo "line_covered=0" >> $GITHUB_OUTPUT
-          echo "line_total=0" >> $GITHUB_OUTPUT
-          echo "method_covered=0" >> $GITHUB_OUTPUT
-          echo "method_total=0" >> $GITHUB_OUTPUT
+          STATUS_EMOJI="🟢"
+          STATUS_TEXT="Good"
         fi
+        
+        echo "=========================================="
+        echo "📊 Code Coverage Report $STATUS_EMOJI"
+        echo "=========================================="
+        echo ""
+        echo "**Overall Status:** $STATUS_TEXT"
+        echo ""
+        echo "| Metric | Coverage | Covered/Total |"
+        echo "|--------|----------|---------------|"
+        echo "| **Instructions** | **${INSTRUCTION_PERCENT}%** | ${INSTRUCTION_COVERED}/${INSTRUCTION_TOTAL} |"
+        echo "| Branches | ${BRANCH_PERCENT}% | ${BRANCH_COVERED}/${BRANCH_TOTAL} |"
+        echo "| Lines | ${LINE_PERCENT}% | ${LINE_COVERED}/${LINE_TOTAL} |"
+        echo "| Methods | ${METHOD_PERCENT}% | ${METHOD_COVERED}/${METHOD_TOTAL} |"
+        echo ""
+        echo "> 📋 **Coverage Thresholds**: 🟢 Good (≥80%) | 🟡 Fair (50-79%) | 🔴 Needs Improvement (<50%)"
+        echo "> ⚠️ **Required**: Coverage must be ≥80% for PR approval"
+        echo ""
+        echo "---"
+        echo "*Generated by [JaCoCo](https://www.jacoco.org/) • [Local act run]*"
+        echo "=========================================="
 
     - name: Comment PR with coverage
       if: github.event_name == 'pull_request'
