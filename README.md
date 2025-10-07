@@ -1,5 +1,6 @@
 # Spring DevOps Example
 
+
 A demonstration Spring Boot application showcasing modern DevOps practices and CI/CD workflows.
 
 ## 🚀 Overview
