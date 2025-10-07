@@ -44,162 +44,21 @@ jobs:
       if: github.event_name == 'pull_request'
       id: parse-coverage
       run: |
-        python3 << 'EOF'
-        import os
-        import csv
-        import sys
+        # Use the existing read-code-coverage.py script
+        COVERAGE_PERCENT=$(python3 .github/scripts/read-code-coverage.py)
         
-        csv_path = "./target/site/jacoco/jacoco.csv"
-        
-        def calculate_percentage(covered, total):
-            if total == 0:
-                return 0.0
-            return round((covered / total) * 100, 2)
-        
-        # Check if CSV file exists
-        if not os.path.exists(csv_path):
-            print(f"ERROR: JaCoCo CSV file not found at {csv_path}")
-            print("Make sure JaCoCo is properly configured and tests have been run.")
-            sys.exit(1)
-        
-        try:
-            with open(csv_path, 'r') as f:
-                reader = csv.reader(f)
-                rows = list(reader)
-                
-                if not rows:
-                    print("ERROR: JaCoCo CSV file is empty")
-                    sys.exit(1)
-                
-                # Get the last row (total summary)
-                last_row = rows[-1]
-                if len(last_row) < 13:
-                    print(f"ERROR: Invalid CSV format. Expected at least 13 columns, got {len(last_row)}")
-                    sys.exit(1)
-                
-                # CSV format: GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED
-                coverage_data = {
-                    'instruction_missed': int(last_row[3]),
-                    'instruction_covered': int(last_row[4]),
-                    'branch_missed': int(last_row[5]),
-                    'branch_covered': int(last_row[6]),
-                    'line_missed': int(last_row[7]),
-                    'line_covered': int(last_row[8]),
-                    'method_missed': int(last_row[11]),
-                    'method_covered': int(last_row[12])
-                }
-                
-                # Calculate totals and percentages
-                instruction_total = coverage_data['instruction_missed'] + coverage_data['instruction_covered']
-                branch_total = coverage_data['branch_missed'] + coverage_data['branch_covered']
-                line_total = coverage_data['line_missed'] + coverage_data['line_covered']
-                method_total = coverage_data['method_missed'] + coverage_data['method_covered']
-                
-                outputs = {
-                    'instruction_percent': str(calculate_percentage(coverage_data['instruction_covered'], instruction_total)),
-                    'branch_percent': str(calculate_percentage(coverage_data['branch_covered'], branch_total)),
-                    'line_percent': str(calculate_percentage(coverage_data['line_covered'], line_total)),
-                    'method_percent': str(calculate_percentage(coverage_data['method_covered'], method_total)),
-                    'instruction_covered': str(coverage_data['instruction_covered']),
-                    'instruction_total': str(instruction_total),
-                    'branch_covered': str(coverage_data['branch_covered']),
-                    'branch_total': str(branch_total),
-                    'line_covered': str(coverage_data['line_covered']),
-                    'line_total': str(line_total),
-                    'method_covered': str(coverage_data['method_covered']),
-                    'method_total': str(method_total)
-                }
-                
-                # Write outputs to GitHub Actions
-                github_output = os.environ.get('GITHUB_OUTPUT')
-                if github_output:
-                    with open(github_output, 'a') as f:
-                        for key, value in outputs.items():
-                            f.write(f"{key}={value}\n")
-                else:
-                    # Fallback for debugging
-                    for key, value in outputs.items():
-                        print(f"{key}={value}")
-                        
-        except (ValueError, IndexError) as e:
-            print(f"ERROR: Failed to parse JaCoCo CSV file: {e}")
-            sys.exit(1)
-        except Exception as e:
-            print(f"ERROR: Unexpected error parsing JaCoCo CSV: {e}")
-            sys.exit(1)
-        EOF
-
-    - name: Log coverage comment (for act/local testing)
-      if: github.event_name == 'pull_request' && env.ACT == 'true'
-      run: |
-        INSTRUCTION_PERCENT='${{ steps.parse-coverage.outputs.instruction_percent }}'
-        BRANCH_PERCENT='${{ steps.parse-coverage.outputs.branch_percent }}'
-        LINE_PERCENT='${{ steps.parse-coverage.outputs.line_percent }}'
-        METHOD_PERCENT='${{ steps.parse-coverage.outputs.method_percent }}'
-        
-        INSTRUCTION_COVERED='${{ steps.parse-coverage.outputs.instruction_covered }}'
-        INSTRUCTION_TOTAL='${{ steps.parse-coverage.outputs.instruction_total }}'
-        BRANCH_COVERED='${{ steps.parse-coverage.outputs.branch_covered }}'
-        BRANCH_TOTAL='${{ steps.parse-coverage.outputs.branch_total }}'
-        LINE_COVERED='${{ steps.parse-coverage.outputs.line_covered }}'
-        LINE_TOTAL='${{ steps.parse-coverage.outputs.line_total }}'
-        METHOD_COVERED='${{ steps.parse-coverage.outputs.method_covered }}'
-        METHOD_TOTAL='${{ steps.parse-coverage.outputs.method_total }}'
-        
-        # Determine overall coverage status
-        OVERALL_COVERAGE=$(echo "$INSTRUCTION_PERCENT" | awk '{print int($1)}')
-        if [ "$OVERALL_COVERAGE" -lt 50 ]; then
-          STATUS_EMOJI="🔴"
-          STATUS_TEXT="Needs Improvement"
-        elif [ "$OVERALL_COVERAGE" -lt 80 ]; then
-          STATUS_EMOJI="🟡"
-          STATUS_TEXT="Fair"
-        else
-          STATUS_EMOJI="🟢"
-          STATUS_TEXT="Good"
-        fi
-        
-        echo "=========================================="
-        echo "📊 Code Coverage Report $STATUS_EMOJI"
-        echo "=========================================="
-        echo ""
-        echo "**Overall Status:** $STATUS_TEXT"
-        echo ""
-        echo "| Metric | Coverage | Covered/Total |"
-        echo "|--------|----------|---------------|"
-        echo "| **Instructions** | **${INSTRUCTION_PERCENT}%** | ${INSTRUCTION_COVERED}/${INSTRUCTION_TOTAL} |"
-        echo "| Branches | ${BRANCH_PERCENT}% | ${BRANCH_COVERED}/${BRANCH_TOTAL} |"
-        echo "| Lines | ${LINE_PERCENT}% | ${LINE_COVERED}/${LINE_TOTAL} |"
-        echo "| Methods | ${METHOD_PERCENT}% | ${METHOD_COVERED}/${METHOD_TOTAL} |"
-        echo ""
-        echo "> 📋 **Coverage Thresholds**: 🟢 Good (≥80%) | 🟡 Fair (50-79%) | 🔴 Needs Improvement (<50%)"
-        echo "> ⚠️ **Required**: Coverage must be ≥80% for PR approval"
-        echo ""
-        echo "---"
-        echo "*Generated by [JaCoCo](https://www.jacoco.org/) • [Local act run]*"
-        echo "=========================================="
+        # Set the coverage percentage as output
+        echo "instruction_percent=$COVERAGE_PERCENT" >> $GITHUB_OUTPUT
 
     - name: Comment PR with coverage
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
       with:
         script: |
-          const instructionPercent = '${{ steps.parse-coverage.outputs.instruction_percent }}';
-          const branchPercent = '${{ steps.parse-coverage.outputs.branch_percent }}';
-          const linePercent = '${{ steps.parse-coverage.outputs.line_percent }}';
-          const methodPercent = '${{ steps.parse-coverage.outputs.method_percent }}';
-          
-          const instructionCovered = '${{ steps.parse-coverage.outputs.instruction_covered }}';
-          const instructionTotal = '${{ steps.parse-coverage.outputs.instruction_total }}';
-          const branchCovered = '${{ steps.parse-coverage.outputs.branch_covered }}';
-          const branchTotal = '${{ steps.parse-coverage.outputs.branch_total }}';
-          const lineCovered = '${{ steps.parse-coverage.outputs.line_covered }}';
-          const lineTotal = '${{ steps.parse-coverage.outputs.line_total }}';
-          const methodCovered = '${{ steps.parse-coverage.outputs.method_covered }}';
-          const methodTotal = '${{ steps.parse-coverage.outputs.method_total }}';
+          const coveragePercent = '${{ steps.parse-coverage.outputs.instruction_percent }}';
           
           // Determine overall coverage status
-          const overallCoverage = parseFloat(instructionPercent);
+          const overallCoverage = parseFloat(coveragePercent);
           let statusEmoji = '🟢';
           let statusText = 'Good';
           
@@ -215,12 +74,9 @@ jobs:
           
           **Overall Status:** ${statusText}
           
-          | Metric | Coverage | Covered/Total |
-          |--------|----------|---------------|
-          | **Instructions** | **${instructionPercent}%** | ${instructionCovered}/${instructionTotal} |
-          | Branches | ${branchPercent}% | ${branchCovered}/${branchTotal} |
-          | Lines | ${linePercent}% | ${lineCovered}/${lineTotal} |
-          | Methods | ${methodPercent}% | ${methodCovered}/${methodTotal} |
+          | Metric | Coverage |
+          |--------|----------|
+          | **Total Coverage** | **${coveragePercent}%** |
           
           > 📋 **Coverage Thresholds**: 🟢 Good (≥80%) | 🟡 Fair (50-79%) | 🔴 Needs Improvement (<50%)  
           > ⚠️ **Required**: Coverage must be ≥80% for PR approval
@@ -238,24 +94,24 @@ jobs:
     - name: Check coverage threshold
       if: github.event_name == 'pull_request'
       run: |
-        INSTRUCTION_PERCENT='${{ steps.parse-coverage.outputs.instruction_percent }}'
+        COVERAGE_PERCENT=$(python3 .github/scripts/read-code-coverage.py)
         COVERAGE_THRESHOLD=80.00
         
-        # Convert to integer for comparison (multiply by 100 to avoid decimal issues)
-        INSTRUCTION_INT=$(echo "$INSTRUCTION_PERCENT * 100" | awk '{printf "%.0f", $1}')
-        THRESHOLD_INT=$(echo "$COVERAGE_THRESHOLD * 100" | awk '{printf "%.0f", $1}')
-        
-        echo "Current coverage: $INSTRUCTION_PERCENT%"
+        echo "Current coverage: $COVERAGE_PERCENT%"
         echo "Required threshold: $COVERAGE_THRESHOLD%"
         
-        if [ $INSTRUCTION_INT -lt $THRESHOLD_INT ]; then
+        # Convert to integers for comparison (multiply by 100 to avoid decimal issues)
+        COVERAGE_INT=$(echo "$COVERAGE_PERCENT * 100" | awk '{printf "%.0f", $1}')
+        THRESHOLD_INT=$(echo "$COVERAGE_THRESHOLD * 100" | awk '{printf "%.0f", $1}')
+        
+        if [ $COVERAGE_INT -lt $THRESHOLD_INT ]; then
           echo "❌ Coverage check failed!"
-          echo "Current coverage ($INSTRUCTION_PERCENT%) is below the required threshold ($COVERAGE_THRESHOLD%)"
+          echo "Current coverage ($COVERAGE_PERCENT%) is below the required threshold ($COVERAGE_THRESHOLD%)"
           echo "Please add more tests to improve code coverage."
           exit 1
         else
           echo "✅ Coverage check passed!"
-          echo "Current coverage ($INSTRUCTION_PERCENT%) meets the required threshold ($COVERAGE_THRESHOLD%)"
+          echo "Current coverage ($COVERAGE_PERCENT%) meets the required threshold ($COVERAGE_THRESHOLD%)"
         fi
           
     - name: Upload coverage artifacts
