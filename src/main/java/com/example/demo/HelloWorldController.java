@@ -13,13 +13,6 @@ public class HelloWorldController {
         return concatenateStrings(greeting, name);
     }
 
-    @GetMapping("/hello/concatenate")
-    public String concatenate(@RequestParam String first,
-                             @RequestParam String second,
-                             @RequestParam(defaultValue = " ") String separator) {
-        return concatenateStrings(first, separator, second);
-    }
-
     /**
      * Helper method to concatenate strings with a separator
      * @param parts the strings to concatenate
