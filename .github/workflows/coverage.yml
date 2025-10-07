@@ -1,8 +1,6 @@
 name: Code Coverage with JaCoCo
 
 on:
-  push:
-    branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
 
@@ -32,41 +30,142 @@ jobs:
     - name: Run tests with JaCoCo
       run: mvn clean test jacoco:report
         
+    - name: Parse JaCoCo XML Report
+      if: github.event_name == 'pull_request'
+      id: parse-coverage
+      run: |
+        if [ -f "./target/site/jacoco/jacoco.csv" ]; then
+          # Extract coverage data from CSV (more reliable than HTML parsing)
+          COVERAGE_DATA=$(tail -n 1 ./target/site/jacoco/jacoco.csv)
+          IFS=',' read -r GROUP MODULE PACKAGE CLASS INSTRUCTION_MISSED INSTRUCTION_COVERED BRANCH_MISSED BRANCH_COVERED LINE_MISSED LINE_COVERED COMPLEXITY_MISSED COMPLEXITY_COVERED METHOD_MISSED METHOD_COVERED <<< "$COVERAGE_DATA"
+          
+          # Calculate percentages
+          TOTAL_INSTRUCTIONS=$((INSTRUCTION_MISSED + INSTRUCTION_COVERED))
+          TOTAL_BRANCHES=$((BRANCH_MISSED + BRANCH_COVERED))
+          TOTAL_LINES=$((LINE_MISSED + LINE_COVERED))
+          TOTAL_METHODS=$((METHOD_MISSED + METHOD_COVERED))
+          
+          if [ $TOTAL_INSTRUCTIONS -gt 0 ]; then
+            INSTRUCTION_PERCENT=$(( (INSTRUCTION_COVERED * 10000) / TOTAL_INSTRUCTIONS ))
+            INSTRUCTION_PERCENT=$(echo "scale=2; $INSTRUCTION_PERCENT / 100" | awk '{printf "%.2f", $1}')
+          else
+            INSTRUCTION_PERCENT="0.00"
+          fi
+          
+          if [ $TOTAL_BRANCHES -gt 0 ]; then
+            BRANCH_PERCENT=$(( (BRANCH_COVERED * 10000) / TOTAL_BRANCHES ))
+            BRANCH_PERCENT=$(echo "scale=2; $BRANCH_PERCENT / 100" | awk '{printf "%.2f", $1}')
+          else
+            BRANCH_PERCENT="0.00"
+          fi
+          
+          if [ $TOTAL_LINES -gt 0 ]; then
+            LINE_PERCENT=$(( (LINE_COVERED * 10000) / TOTAL_LINES ))
+            LINE_PERCENT=$(echo "scale=2; $LINE_PERCENT / 100" | awk '{printf "%.2f", $1}')
+          else
+            LINE_PERCENT="0.00"
+          fi
+          
+          if [ $TOTAL_METHODS -gt 0 ]; then
+            METHOD_PERCENT=$(( (METHOD_COVERED * 10000) / TOTAL_METHODS ))
+            METHOD_PERCENT=$(echo "scale=2; $METHOD_PERCENT / 100" | awk '{printf "%.2f", $1}')
+          else
+            METHOD_PERCENT="0.00"
+          fi
+          
+          echo "instruction_percent=$INSTRUCTION_PERCENT" >> $GITHUB_OUTPUT
+          echo "branch_percent=$BRANCH_PERCENT" >> $GITHUB_OUTPUT
+          echo "line_percent=$LINE_PERCENT" >> $GITHUB_OUTPUT
+          echo "method_percent=$METHOD_PERCENT" >> $GITHUB_OUTPUT
+          echo "instruction_covered=$INSTRUCTION_COVERED" >> $GITHUB_OUTPUT
+          echo "instruction_total=$TOTAL_INSTRUCTIONS" >> $GITHUB_OUTPUT
+          echo "branch_covered=$BRANCH_COVERED" >> $GITHUB_OUTPUT
+          echo "branch_total=$TOTAL_BRANCHES" >> $GITHUB_OUTPUT
+          echo "line_covered=$LINE_COVERED" >> $GITHUB_OUTPUT
+          echo "line_total=$TOTAL_LINES" >> $GITHUB_OUTPUT
+          echo "method_covered=$METHOD_COVERED" >> $GITHUB_OUTPUT
+          echo "method_total=$TOTAL_METHODS" >> $GITHUB_OUTPUT
+        else
+          echo "instruction_percent=0.00" >> $GITHUB_OUTPUT
+          echo "branch_percent=0.00" >> $GITHUB_OUTPUT
+          echo "line_percent=0.00" >> $GITHUB_OUTPUT
+          echo "method_percent=0.00" >> $GITHUB_OUTPUT
+          echo "instruction_covered=0" >> $GITHUB_OUTPUT
+          echo "instruction_total=0" >> $GITHUB_OUTPUT
+          echo "branch_covered=0" >> $GITHUB_OUTPUT
+          echo "branch_total=0" >> $GITHUB_OUTPUT
+          echo "line_covered=0" >> $GITHUB_OUTPUT
+          echo "line_total=0" >> $GITHUB_OUTPUT
+          echo "method_covered=0" >> $GITHUB_OUTPUT
+          echo "method_total=0" >> $GITHUB_OUTPUT
+        fi
+
     - name: Comment PR with coverage
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
       with:
         script: |
-          const fs = require('fs');
-          const path = './target/site/jacoco/index.html';
+          const instructionPercent = '${{ steps.parse-coverage.outputs.instruction_percent }}';
+          const branchPercent = '${{ steps.parse-coverage.outputs.branch_percent }}';
+          const linePercent = '${{ steps.parse-coverage.outputs.line_percent }}';
+          const methodPercent = '${{ steps.parse-coverage.outputs.method_percent }}';
           
-          if (fs.existsSync(path)) {
-            const coverage = fs.readFileSync(path, 'utf8');
-            // Extract coverage percentage from HTML (simplified)
-            const match = coverage.match(/Total.*?(\d+\.?\d*)%/);
-            const percentage = match ? match[1] : 'N/A';
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## 📊 Code Coverage Report
-              
-              **Coverage: ${percentage}%**
-              
-              Detailed coverage report is available in the [workflow artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).
-              
-              📁 Coverage files:
-              - [HTML Report](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-              - [XML Report](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
-            });
+          const instructionCovered = '${{ steps.parse-coverage.outputs.instruction_covered }}';
+          const instructionTotal = '${{ steps.parse-coverage.outputs.instruction_total }}';
+          const branchCovered = '${{ steps.parse-coverage.outputs.branch_covered }}';
+          const branchTotal = '${{ steps.parse-coverage.outputs.branch_total }}';
+          const lineCovered = '${{ steps.parse-coverage.outputs.line_covered }}';
+          const lineTotal = '${{ steps.parse-coverage.outputs.line_total }}';
+          const methodCovered = '${{ steps.parse-coverage.outputs.method_covered }}';
+          const methodTotal = '${{ steps.parse-coverage.outputs.method_total }}';
+          
+          // Determine overall coverage status
+          const overallCoverage = parseFloat(instructionPercent);
+          let statusEmoji = '🟢';
+          let statusText = 'Good';
+          
+          if (overallCoverage < 50) {
+            statusEmoji = '🔴';
+            statusText = 'Needs Improvement';
+          } else if (overallCoverage < 80) {
+            statusEmoji = '🟡';
+            statusText = 'Fair';
           }
+          
+          const commentBody = `## 📊 Code Coverage Report ${statusEmoji}
+          
+          **Overall Status:** ${statusText}
+          
+          | Metric | Coverage | Covered/Total |
+          |--------|----------|---------------|
+          | **Instructions** | **${instructionPercent}%** | ${instructionCovered}/${instructionTotal} |
+          | Branches | ${branchPercent}% | ${branchCovered}/${branchTotal} |
+          | Lines | ${linePercent}% | ${lineCovered}/${lineTotal} |
+          | Methods | ${methodPercent}% | ${methodCovered}/${methodTotal} |
+          
+          ### 📁 Coverage Reports
+          - **HTML Report**: Available in workflow artifacts
+          - **XML Report**: Available in workflow artifacts  
+          - **CSV Report**: Available in workflow artifacts
+          
+          > 📋 **Coverage Thresholds**: 🟢 Good (≥80%) | 🟡 Fair (50-79%) | 🔴 Needs Improvement (<50%)
+          
+          ---
+          *Generated by [JaCoCo](https://www.jacoco.org/) • [View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: commentBody
+          });
           
     - name: Upload coverage artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: coverage-report
+        name: coverage-report-${{ github.run_number }}
         path: |
           target/site/jacoco/
           target/jacoco.exec
+          target/surefire-reports/
         retention-days: 30
