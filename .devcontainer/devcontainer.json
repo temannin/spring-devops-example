@@ -2,6 +2,10 @@
   "name": "Java Dev Container",
   "image": "ghcr.io/temannin/devcontainers-java-17",
   
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  
   "customizations": {
     "vscode": {
       "extensions": [
